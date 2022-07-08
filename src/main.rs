@@ -2,6 +2,7 @@ use clap::Parser;
 use serde::{self, Deserialize, Serialize};
 use std::{
     collections::HashMap,
+    fmt::Write,
     fs::File,
     io::{self, Error, ErrorKind, Read},
 };
@@ -10,15 +11,20 @@ use tree_sitter::{Language, Tree};
 #[derive(Parser, Debug)]
 #[clap(author, version, about, long_about = None)]
 struct Args {
-    #[clap(short, long, value_parser)]
-    input: Option<String>,
+    #[clap(value_parser)]
+    input1: Option<String>,
+    #[clap(value_parser)]
+    input2: Option<String>,
     #[clap(short, long, value_parser)]
     language: String,
+    #[clap(short, long, value_parser, default_value = "json")]
+    format: String,
 }
 
 extern "C" {
     fn tree_sitter_javascript() -> Language;
     fn tree_sitter_rust() -> Language;
+    fn tree_sitter_haskell() -> Language;
 }
 
 #[derive(PartialEq, Debug, Clone, Serialize, Deserialize)]
@@ -105,16 +111,21 @@ fn construct_list(exp_stack: &mut Vec<SExp>) {
 }
 
 fn main() -> io::Result<()> {
-    let args = Args::parse();
-    let mut buffer = String::new();
-    match args.input {
-        None => io::stdin().read_to_string(&mut buffer)?,
-        Some(filepath) => File::open(filepath)?.read_to_string(&mut buffer)?,
-    };
-
     let mut languages = HashMap::new();
     languages.insert("javascript", unsafe { tree_sitter_javascript() });
     languages.insert("rust", unsafe { tree_sitter_rust() });
+    languages.insert("haskell", unsafe { tree_sitter_haskell() });
+
+    let args = Args::parse();
+
+    let source_code = match args.input1 {
+        None => {
+            let mut buffer = String::new();
+            io::stdin().read_to_string(&mut buffer).unwrap();
+            buffer
+        }
+        Some(input) => input,
+    };
 
     let mut parser = tree_sitter::Parser::new();
     let language = languages
@@ -124,16 +135,38 @@ fn main() -> io::Result<()> {
         .set_language(*language)
         .map_err(|_err| Error::new(ErrorKind::Other, "cannot set language"))?;
 
-    let source_code: &str = buffer.as_str();
-    println!("{}", source_code);
+    let tree = parser.parse(&source_code, None).unwrap();
 
-    let tree = parser.parse(source_code, None).unwrap();
+    let sexp = to_sexp(&source_code.as_bytes(), &tree);
+    let json = serde_json::to_string(&sexp)?;
+    let lexpr = serde_lexpr::to_string(&sexp)?;
 
-    let sexp = to_sexp(source_code.as_bytes(), &tree);
-    println!("{:?}", sexp);
+    match &args.format {
+        x if x == "echo" => println!("{}", source_code),
+        x if x == "debug" => println!("{:?}", sexp),
+        x if x == "json" => println!("{}", json),
+        x if x == "sexpr" => println!("{}", lexpr),
+        x => panic!("{} is not supported.", x),
+    }
 
-    let json = serde_json::to_string_pretty(&sexp)?;
-    println!("{}", json);
+    let source_code2 = match args.input2 {
+        None => return Ok(()),
+        Some(input) => input,
+    };
+
+    let tree2 = parser.parse(&source_code2, None).unwrap();
+
+    let sexp2 = to_sexp(&source_code2.as_bytes(), &tree2);
+    let json2 = serde_json::to_string(&sexp2)?;
+    let lexpr2 = serde_lexpr::to_string(&sexp2)?;
+
+    match &args.format {
+        x if x == "echo" => println!("{}", source_code2),
+        x if x == "debug" => println!("{:?}", sexp2),
+        x if x == "json" => println!("{}", json2),
+        x if x == "sexpr" => println!("{}", lexpr2),
+        x => panic!("{} is not supported.", x),
+    }
 
     Ok(())
 }
