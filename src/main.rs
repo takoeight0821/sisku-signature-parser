@@ -1,4 +1,20 @@
-use tree_sitter::{Language, Parser, Tree};
+use std::{
+    collections::HashMap,
+    fs::File,
+    io::{self, Error, ErrorKind, Read},
+};
+
+use clap::Parser;
+use tree_sitter::{Language, Tree};
+
+#[derive(Parser, Debug)]
+#[clap(author, version, about, long_about = None)]
+struct Args {
+    #[clap(short, long, value_parser)]
+    input: Option<String>,
+    #[clap(short, long, value_parser)]
+    language: String,
+}
 
 extern "C" {
     fn tree_sitter_javascript() -> Language;
@@ -87,88 +103,30 @@ fn construct_list(exp_stack: &mut Vec<SExp>) {
     }
 }
 
-fn dump_sexp(source_code: &[u8], tree: &Tree) {
-    let mut cursor = tree.walk();
+fn main() -> io::Result<()> {
+    let args = Args::parse();
+    let mut buffer = String::new();
+    match args.input {
+        None => io::stdin().read_to_string(&mut buffer)?,
+        Some(filepath) => File::open(filepath)?.read_to_string(&mut buffer)?,
+    };
 
-    let mut needs_newline = false;
-    let mut indent_level = 0;
-    let mut visited_children = false;
-    loop {
-        let node = cursor.node();
-        let is_named = node.is_named();
-        if visited_children {
-            if is_named {
-                print!(")");
-            }
-            if cursor.goto_next_sibling() {
-                visited_children = false;
-            } else if cursor.goto_parent() {
-                visited_children = true;
-                indent_level -= 1;
-            } else {
-                break;
-            }
-        } else {
-            if is_named {
-                if needs_newline {
-                    print!("\n");
-                }
-                for _ in 0..indent_level {
-                    print!("  ");
-                }
-                if let Some(field_name) = cursor.field_name() {
-                    print!("{}: ", field_name);
-                }
-                print!("({}", node.kind());
-                needs_newline = true;
-            }
-            if cursor.goto_first_child() {
-                visited_children = false;
-                indent_level += 1;
-            } else {
-                visited_children = true;
+    let mut languages = HashMap::new();
+    languages.insert("javascript", unsafe { tree_sitter_javascript() });
 
-                let start = node.start_byte();
-                let end = node.end_byte();
-                let value = std::str::from_utf8(&source_code[start..end]).expect("has a string");
+    let mut parser = tree_sitter::Parser::new();
+    let language = languages
+        .get(args.language.as_str())
+        .ok_or(Error::new(ErrorKind::Other, "unexpected language"))?;
+    parser
+        .set_language(*language)
+        .map_err(|_err| Error::new(ErrorKind::Other, "cannot set language"))?;
 
-                print!(" `{}`", value);
-            }
-        }
-    }
-    println!("");
-}
-
-fn main() {
-    let mut parser = Parser::new();
-    let language = unsafe { tree_sitter_javascript() };
-    parser.set_language(language).unwrap();
-
-    let source_code = "function add(x, y) { return x + y }";
+    let source_code: &str = buffer.as_str();
     let tree = parser.parse(source_code, None).unwrap();
 
     println!("{}", source_code);
-    dump_sexp(source_code.as_bytes(), &tree);
     println!("{:?}", to_sexp(source_code.as_bytes(), &tree));
 
-    let source_code = "add(x, y)";
-    let tree = parser.parse(source_code, None).unwrap();
-
-    println!("{}", source_code);
-    dump_sexp(source_code.as_bytes(), &tree);
-    println!("{:?}", to_sexp(source_code.as_bytes(), &tree));
-
-    let source_code = "function add(x, y)";
-    let tree = parser.parse(source_code, None).unwrap();
-
-    println!("{}", source_code);
-    dump_sexp(source_code.as_bytes(), &tree);
-    println!("{:?}", to_sexp(source_code.as_bytes(), &tree));
-
-    let source_code = "const f = (x) => { return \"hoge\" }";
-    let tree = parser.parse(source_code, None).unwrap();
-
-    println!("{}", source_code);
-    dump_sexp(source_code.as_bytes(), &tree);
-    println!("{:?}", to_sexp(source_code.as_bytes(), &tree));
+    Ok(())
 }
