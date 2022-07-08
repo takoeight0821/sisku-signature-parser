@@ -1,10 +1,10 @@
+use clap::Parser;
+use serde::{self, Deserialize, Serialize};
 use std::{
     collections::HashMap,
     fs::File,
     io::{self, Error, ErrorKind, Read},
 };
-
-use clap::Parser;
 use tree_sitter::{Language, Tree};
 
 #[derive(Parser, Debug)]
@@ -18,9 +18,10 @@ struct Args {
 
 extern "C" {
     fn tree_sitter_javascript() -> Language;
+    fn tree_sitter_rust() -> Language;
 }
 
-#[derive(PartialEq, Debug, Clone)]
+#[derive(PartialEq, Debug, Clone, Serialize, Deserialize)]
 enum SExp {
     Kind(String),
     Field(String),
@@ -113,6 +114,7 @@ fn main() -> io::Result<()> {
 
     let mut languages = HashMap::new();
     languages.insert("javascript", unsafe { tree_sitter_javascript() });
+    languages.insert("rust", unsafe { tree_sitter_rust() });
 
     let mut parser = tree_sitter::Parser::new();
     let language = languages
@@ -123,10 +125,15 @@ fn main() -> io::Result<()> {
         .map_err(|_err| Error::new(ErrorKind::Other, "cannot set language"))?;
 
     let source_code: &str = buffer.as_str();
+    println!("{}", source_code);
+
     let tree = parser.parse(source_code, None).unwrap();
 
-    println!("{}", source_code);
-    println!("{:?}", to_sexp(source_code.as_bytes(), &tree));
+    let sexp = to_sexp(source_code.as_bytes(), &tree);
+    println!("{:?}", sexp);
+
+    let json = serde_json::to_string_pretty(&sexp)?;
+    println!("{}", json);
 
     Ok(())
 }

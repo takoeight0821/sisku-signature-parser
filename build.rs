@@ -7,4 +7,11 @@ fn main() {
         .file(dir.join("parser.c"))
         .file(dir.join("scanner.c"))
         .compile("tree-sitter-javascript");
+
+    let dir: PathBuf = ["tree-sitter-rust", "src"].iter().collect();
+    cc::Build::new()
+        .include(&dir)
+        .file(dir.join("parser.c"))
+        .file(dir.join("scanner.c"))
+        .compile("tree-sitter-rust");
 }
